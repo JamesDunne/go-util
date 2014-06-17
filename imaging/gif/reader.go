@@ -29,6 +29,13 @@ type reader interface {
 	io.ByteReader
 }
 
+const (
+	fdmNone            = 0
+	fdmCombine         = 1
+	fdmBGClear         = 2
+	fdmRestorePrevious = 3
+)
+
 // Masks etc.
 const (
 	// Fields.
@@ -72,6 +79,13 @@ type decoder struct {
 	loopCount       int
 	delayTime       int
 
+	lastFlags          byte
+	lastDisposalMethod byte
+	lastFrameBounds    image.Rectangle
+
+	disposalMethod byte // Pulled from `flags`
+	frameBounds    image.Rectangle
+
 	// Unused from header.
 	aspect byte
 
@@ -79,17 +93,17 @@ type decoder struct {
 	imageFields byte
 
 	// From graphics control.
-	transparentIndex    byte
-	hasTransparentIndex bool
+	transparentIndex byte
 
 	// Computed.
 	pixelSize      uint
 	globalColorMap color.Palette
 
 	// Used when decoding.
-	delay []int
-	image []*image.Paletted
-	tmp   [1024]byte // must be at least 768 so we can read color map
+	delay              []int
+	image              []*image.Paletted
+	transparentIndices []int
+	tmp                [1024]byte // must be at least 768 so we can read color map
 }
 
 // blockReader parses the block structure of GIF image data, which
@@ -155,6 +169,7 @@ func (d *decoder) decode(r io.Reader, configOnly bool) error {
 		}
 	}
 
+	frame := 0
 	for {
 		c, err := d.r.ReadByte()
 		if err != nil {
@@ -179,9 +194,7 @@ func (d *decoder) decode(r io.Reader, configOnly bool) error {
 			} else {
 				m.Palette = d.globalColorMap
 			}
-			if d.hasTransparentIndex && int(d.transparentIndex) < len(m.Palette) {
-				m.Palette[d.transparentIndex] = color.RGBA{}
-			}
+
 			litWidth, err := d.r.ReadByte()
 			if err != nil {
 				return err
@@ -215,26 +228,77 @@ func (d *decoder) decode(r io.Reader, configOnly bool) error {
 			}
 
 			// Check that the color indexes are inside the palette.
-			if len(m.Palette) < 256 {
-				for _, pixel := range m.Pix {
-					if int(pixel) >= len(m.Palette) {
-						return errBadPixel
-					}
-				}
-			}
+			//if len(m.Palette) < 256 {
+			//	for _, pixel := range m.Pix {
+			//		if int(pixel) >= len(m.Palette) {
+			//			return errBadPixel
+			//		}
+			//	}
+			//}
 
 			// Undo the interlacing if necessary.
 			if d.imageFields&ifInterlace != 0 {
 				uninterlace(m)
 			}
 
-			d.image = append(d.image, m)
+			// Create a new full-frame image:
+			fr := image.NewPaletted(image.Rect(0, 0, d.width, d.height), m.Palette)
+
+			isTransparent := d.flags&gcTransparentColorSet != 0
+			if frame == 0 || d.lastDisposalMethod == fdmBGClear {
+				clearColor := d.backgroundIndex
+				if d.lastFlags&gcTransparentColorSet != 0 {
+					clearColor = d.transparentIndex
+				}
+				for y := d.lastFrameBounds.Min.Y; y < d.lastFrameBounds.Max.Y; y++ {
+					for x := d.lastFrameBounds.Min.X; x < d.lastFrameBounds.Max.X; x++ {
+						fr.SetColorIndex(x, y, clearColor)
+					}
+				}
+			} else if frame > 0 && (d.lastDisposalMethod == fdmCombine || d.lastDisposalMethod == fdmNone) {
+				// Copy in the previous frame:
+				src := d.image[frame-1]
+				for y := 0; y < d.height; y++ {
+					for x := 0; x < d.width; x++ {
+						c := src.ColorIndexAt(x, y)
+						fr.SetColorIndex(x, y, c)
+					}
+				}
+			} else {
+				// TODO(jsd): Handle other clear methods.
+			}
+
+			// Copy the temporary frame onto the current frame, skipping transparent:
+			if isTransparent {
+				// Transparent overlay:
+				for y := m.Rect.Min.Y; y < m.Rect.Max.Y; y++ {
+					for x := m.Rect.Min.X; x < m.Rect.Max.X; x++ {
+						c := m.ColorIndexAt(x, y)
+						if c == d.transparentIndex {
+							continue
+						}
+						fr.SetColorIndex(x, y, c)
+					}
+				}
+			} else {
+				// Opaque copy:
+				for y := m.Rect.Min.Y; y < m.Rect.Max.Y; y++ {
+					for x := m.Rect.Min.X; x < m.Rect.Max.X; x++ {
+						c := m.ColorIndexAt(x, y)
+						fr.SetColorIndex(x, y, c)
+					}
+				}
+			}
+
+			d.image = append(d.image, fr)
 			d.delay = append(d.delay, d.delayTime)
-			// The GIF89a spec, Section 23 (Graphic Control Extension) says:
-			// "The scope of this extension is the first graphic rendering block
-			// to follow." We therefore reset the GCE fields to zero.
-			d.delayTime = 0
-			d.hasTransparentIndex = false
+			if isTransparent {
+				d.transparentIndices = append(d.transparentIndices, int(d.transparentIndex))
+			} else {
+				d.transparentIndices = append(d.transparentIndices, int(-2))
+			}
+			frame++
+			d.delayTime = 0 // TODO: is this correct, or should we hold on to the value?
 
 		case sTrailer:
 			if len(d.image) == 0 {
@@ -264,6 +328,8 @@ func (d *decoder) readHeaderAndScreenDescriptor() error {
 	d.aspect = d.tmp[12]
 	d.loopCount = -1
 	d.pixelSize = uint(d.headerFields&7) + 1
+	d.frameBounds = image.Rect(0, 0, d.width, d.height)
+	d.lastFrameBounds = d.frameBounds
 	return nil
 }
 
@@ -341,11 +407,15 @@ func (d *decoder) readGraphicControl() error {
 	if _, err := io.ReadFull(d.r, d.tmp[0:6]); err != nil {
 		return fmt.Errorf("gif: can't read graphic control: %s", err)
 	}
+	d.lastFlags = d.flags
+	d.lastDisposalMethod = d.disposalMethod
+
 	d.flags = d.tmp[1]
+	d.disposalMethod = (d.flags & 0x1c) >> 2
+
 	d.delayTime = int(d.tmp[2]) | int(d.tmp[3])<<8
 	if d.flags&gcTransparentColorSet != 0 {
 		d.transparentIndex = d.tmp[4]
-		d.hasTransparentIndex = true
 	}
 	return nil
 }
@@ -363,11 +433,12 @@ func (d *decoder) newImageFromDescriptor() (*image.Paletted, error) {
 	// The GIF89a spec, Section 20 (Image Descriptor) says:
 	// "Each image must fit within the boundaries of the Logical
 	// Screen, as defined in the Logical Screen Descriptor."
-	bounds := image.Rect(left, top, left+width, top+height)
-	if bounds != bounds.Intersect(image.Rect(0, 0, d.width, d.height)) {
+	d.lastFrameBounds = d.frameBounds
+	d.frameBounds = image.Rect(left, top, left+width, top+height)
+	if d.frameBounds != d.frameBounds.Intersect(image.Rect(0, 0, d.width, d.height)) {
 		return nil, errors.New("gif: frame bounds larger than image bounds")
 	}
-	return image.NewPaletted(bounds, nil), nil
+	return image.NewPaletted(d.frameBounds, nil), nil
 }
 
 func (d *decoder) readBlock() (int, error) {
@@ -424,6 +495,8 @@ type GIF struct {
 	Image     []*image.Paletted // The successive images.
 	Delay     []int             // The successive delay times, one per frame, in 100ths of a second.
 	LoopCount int               // The loop count.
+
+	TransparentIndices []int // The transparent color indexes per image, or -2 to represent no transparency, or -1 to represent unknown transparency (detect it from palette).
 }
 
 // DecodeAll reads a GIF image from r and returns the sequential frames
@@ -434,9 +507,10 @@ func DecodeAll(r io.Reader) (*GIF, error) {
 		return nil, err
 	}
 	gif := &GIF{
-		Image:     d.image,
-		LoopCount: d.loopCount,
-		Delay:     d.delay,
+		Image:              d.image,
+		LoopCount:          d.loopCount,
+		Delay:              d.delay,
+		TransparentIndices: d.transparentIndices,
 	}
 	return gif, nil
 }

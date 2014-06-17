@@ -109,9 +109,10 @@ var frames = []string{
 
 func TestEncodeAll(t *testing.T) {
 	g0 := &GIF{
-		Image:     make([]*image.Paletted, len(frames)),
-		Delay:     make([]int, len(frames)),
-		LoopCount: 5,
+		Image:              make([]*image.Paletted, len(frames)),
+		Delay:              make([]int, len(frames)),
+		LoopCount:          5,
+		TransparentIndices: make([]int, len(frames)),
 	}
 	for i, f := range frames {
 		m, err := readGIF(f)

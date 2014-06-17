@@ -168,7 +168,7 @@ func (e *encoder) writeColorTable(p color.Palette, size int) {
 	e.write(e.buf[:3*log2Lookup[size]])
 }
 
-func (e *encoder) writeImageBlock(pm *image.Paletted, delay int) {
+func (e *encoder) writeImageBlock(pm *image.Paletted, delay, transparentIndex int) {
 	if e.err != nil {
 		return
 	}
@@ -184,19 +184,22 @@ func (e *encoder) writeImageBlock(pm *image.Paletted, delay int) {
 		return
 	}
 
-	transparentIndex := -1
-	for i, c := range pm.Palette {
-		if _, _, _, a := c.RGBA(); a == 0 {
-			transparentIndex = i
-			break
+	// -1 means unknown transparent index; -2 means definitely no transparent index.
+	if transparentIndex == -1 {
+		for i, c := range pm.Palette {
+			if _, _, _, a := c.RGBA(); a == 0 {
+				transparentIndex = i
+				break
+			}
 		}
+		transparentIndex = -2
 	}
 
-	if delay > 0 || transparentIndex != -1 {
+	if delay > 0 || transparentIndex >= 0 {
 		e.buf[0] = sExtension  // Extension Introducer.
 		e.buf[1] = gcLabel     // Graphic Control Label.
 		e.buf[2] = gcBlockSize // Block Size.
-		if transparentIndex != -1 {
+		if transparentIndex >= 0 {
 			e.buf[3] = 0x01
 		} else {
 			e.buf[3] = 0x00
@@ -204,7 +207,7 @@ func (e *encoder) writeImageBlock(pm *image.Paletted, delay int) {
 		writeUint16(e.buf[4:6], uint16(delay)) // Delay Time (1/100ths of a second)
 
 		// Transparent color index.
-		if transparentIndex != -1 {
+		if transparentIndex >= 0 {
 			e.buf[6] = uint8(transparentIndex)
 		} else {
 			e.buf[6] = 0x00
@@ -267,6 +270,10 @@ func EncodeAll(w io.Writer, g *GIF) error {
 	if len(g.Image) != len(g.Delay) {
 		return errors.New("gif: mismatched image and delay lengths")
 	}
+	if (len(g.TransparentIndices) > 0) && (len(g.Image) != len(g.TransparentIndices)) {
+		return errors.New("gif: mismatched image and TransparentIndices lengths")
+	}
+
 	if g.LoopCount < 0 {
 		g.LoopCount = 0
 	}
@@ -280,7 +287,11 @@ func EncodeAll(w io.Writer, g *GIF) error {
 
 	e.writeHeader()
 	for i, pm := range g.Image {
-		e.writeImageBlock(pm, g.Delay[i])
+		ti := -1
+		if len(g.TransparentIndices) > 0 {
+			ti = g.TransparentIndices[i]
+		}
+		e.writeImageBlock(pm, g.Delay[i], ti)
 	}
 	e.writeByte(sTrailer)
 	e.flush()
@@ -317,7 +328,8 @@ func Encode(w io.Writer, m image.Image, o *Options) error {
 	}
 
 	return EncodeAll(w, &GIF{
-		Image: []*image.Paletted{pm},
-		Delay: []int{0},
+		Image:              []*image.Paletted{pm},
+		Delay:              []int{0},
+		TransparentIndices: []int{-1},
 	})
 }
