@@ -28,3 +28,9 @@ func Try(attempt func()) (panicked interface{}, stackTrace string) {
 	stackTrace = ""
 	return
 }
+
+func PanicIf(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
