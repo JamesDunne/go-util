@@ -68,7 +68,7 @@ func ParseListenable(s string) (l *Listenable, err error) {
 }
 
 // Main method to start up a server.
-func ServeMain(la *Listenable, server func(net.Listener)) (err error) {
+func ServeMain(la *Listenable, server func(net.Listener) error) (sig os.Signal, err error) {
 	// Create the socket to listen on:
 	var l net.Listener
 	l, err = net.Listen(la.Network, la.Address)
@@ -84,8 +84,8 @@ func ServeMain(la *Listenable, server func(net.Listener)) (err error) {
 	signal.Notify(sigc, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGQUIT)
 
 	go func() {
-		// Start a server:
-		server(l)
+		// Start a server; `err` will be returned to the caller:
+		err = server(l)
 
 		// Signal completion:
 		sigc <- terminateSignal{}
@@ -93,7 +93,7 @@ func ServeMain(la *Listenable, server func(net.Listener)) (err error) {
 	}()
 
 	// Wait for a termination signal (normal or otherwise):
-	sig := <-sigc
+	sig = <-sigc
 
 	// Stop listening:
 	l.Close()
@@ -103,10 +103,5 @@ func ServeMain(la *Listenable, server func(net.Listener)) (err error) {
 		os.Remove(la.Address)
 	}
 
-	// Our own terminateSignal is not an error condition:
-	if _, ok := sig.(*terminateSignal); ok {
-		return nil
-	}
-
-	return errors.New(sig.String())
+	return
 }
