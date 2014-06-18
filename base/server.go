@@ -3,6 +3,7 @@ package base
 import (
 	"errors"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,10 +17,61 @@ func (t terminateSignal) String() string {
 
 func (t terminateSignal) Signal() {}
 
-func ServeMain(ltype, laddr string, server func(net.Listener)) (err error) {
+type Dialable struct {
+	Network, Address string
+}
+
+func ParseDialable(s string) (d *Dialable, err error) {
+	var u *url.URL
+	u, err = url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+
+	var ltype, laddr string
+	ltype = u.Scheme
+	if ltype == "unix" {
+		if u.Host != "" {
+			return nil, errors.New("Dialable unix URI must have blank host, e.g. unix:///path/to/socket")
+		}
+		laddr = u.Path
+	} else {
+		laddr = u.Host
+	}
+
+	return &Dialable{Network: ltype, Address: laddr}, nil
+}
+
+type Listenable struct {
+	Network, Address string
+}
+
+func ParseListenable(s string) (l *Listenable, err error) {
+	var u *url.URL
+	u, err = url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+
+	var ltype, laddr string
+	ltype = u.Scheme
+	if ltype == "unix" {
+		if u.Host != "" {
+			return nil, errors.New("Listenable unix URI must have blank host, e.g. unix:///path/to/socket")
+		}
+		laddr = u.Path
+	} else {
+		laddr = u.Host
+	}
+
+	return &Listenable{Network: ltype, Address: laddr}, nil
+}
+
+// Main method to start up a server.
+func ServeMain(la *Listenable, server func(net.Listener)) (err error) {
 	// Create the socket to listen on:
 	var l net.Listener
-	l, err = net.Listen(ltype, laddr)
+	l, err = net.Listen(la.Network, la.Address)
 	if err != nil {
 		return
 	}
@@ -47,8 +99,8 @@ func ServeMain(ltype, laddr string, server func(net.Listener)) (err error) {
 	l.Close()
 
 	// Delete the unix socket, if applicable:
-	if ltype == "unix" {
-		os.Remove(laddr)
+	if la.Network == "unix" {
+		os.Remove(la.Address)
 	}
 
 	// Our own terminateSignal is not an error condition:
