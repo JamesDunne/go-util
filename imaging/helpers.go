@@ -11,9 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"code.google.com/p/go.image/bmp"
-	"code.google.com/p/go.image/tiff"
 )
 
 // Open loads an image from file
@@ -38,7 +35,7 @@ func Open(filename string) (img image.Image, err error) {
 func Save(img image.Image, filename string) (err error) {
 	format := strings.ToLower(filepath.Ext(filename))
 	okay := false
-	for _, ext := range []string{".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"} {
+	for _, ext := range []string{".jpg", ".jpeg", ".png"} {
 		if format == ext {
 			okay = true
 			break
@@ -74,10 +71,6 @@ func Save(img image.Image, filename string) (err error) {
 
 	case ".png":
 		err = png.Encode(file, img)
-	case ".tif", ".tiff":
-		err = tiff.Encode(file, img, &tiff.Options{Compression: tiff.Deflate, Predictor: true})
-	case ".bmp":
-		err = bmp.Encode(file, img)
 	}
 	return
 }
