@@ -1,11 +1,13 @@
 package imaging
 
 import (
+	"fmt"
 	"image"
 	"image/color"
+	"reflect"
 )
 
-// Clone returns a copy of the given image.
+// Clone returns a copy of the given image in NRGBA kind.
 func Clone(img image.Image) *image.NRGBA {
 	srcBounds := img.Bounds()
 	dstBounds := srcBounds.Sub(srcBounds.Min)
@@ -191,4 +193,100 @@ func Clone(img image.Image) *image.NRGBA {
 	}
 
 	return dst
+}
+
+// Copies an image to a new image of the same kind:
+func CloneKind(src image.Image) image.Image {
+	srcBounds := src.Bounds().Canon()
+	zeroedBounds := srcBounds.Sub(srcBounds.Min)
+
+	switch si := src.(type) {
+	case *image.RGBA:
+		out := image.NewRGBA(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetRGBA(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.RGBA))
+			}
+		}
+		return out
+	case *image.YCbCr:
+		out := image.NewYCbCr(zeroedBounds, si.SubsampleRatio)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				ycbcr := si.At(x, y).(color.YCbCr)
+				yoffs := out.YOffset(x-srcBounds.Min.X, y-srcBounds.Min.Y)
+				coffs := out.COffset(x-srcBounds.Min.X, y-srcBounds.Min.Y)
+				out.Y[yoffs] = ycbcr.Y
+				out.Cb[coffs] = ycbcr.Cb
+				out.Cr[coffs] = ycbcr.Cr
+			}
+		}
+		return out
+	case *image.Paletted:
+		out := image.NewPaletted(zeroedBounds, si.Palette)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetColorIndex(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.ColorIndexAt(x, y))
+			}
+		}
+		return out
+	case *image.RGBA64:
+		out := image.NewRGBA64(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetRGBA64(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.RGBA64))
+			}
+		}
+		return out
+	case *image.NRGBA:
+		out := image.NewNRGBA(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetNRGBA(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.NRGBA))
+			}
+		}
+		return out
+	case *image.NRGBA64:
+		out := image.NewNRGBA64(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetNRGBA64(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.NRGBA64))
+			}
+		}
+		return out
+	case *image.Alpha:
+		out := image.NewAlpha(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetAlpha(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.Alpha))
+			}
+		}
+		return out
+	case *image.Alpha16:
+		out := image.NewAlpha16(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetAlpha16(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.Alpha16))
+			}
+		}
+		return out
+	case *image.Gray:
+		out := image.NewGray(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetGray(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.Gray))
+			}
+		}
+		return out
+	case *image.Gray16:
+		out := image.NewGray16(zeroedBounds)
+		for y := srcBounds.Min.Y; y < srcBounds.Max.Y; y++ {
+			for x := srcBounds.Min.X; x < srcBounds.Max.X; x++ {
+				out.SetGray16(x-srcBounds.Min.X, y-srcBounds.Min.Y, si.At(x, y).(color.Gray16))
+			}
+		}
+		return out
+	default:
+		panic(fmt.Errorf("Unhandled image format type: %s", reflect.TypeOf(src).Name()))
+	}
 }
