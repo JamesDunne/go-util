@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 )
 
@@ -71,9 +72,9 @@ func ParseListenable(s string) (l *Listenable, err error) {
 func ServeMain(la *Listenable, server func(net.Listener) error) (sig os.Signal, err error) {
 	// Create the folder for any unix sockets to live in:
 	if la.Network == "unix" {
-		// TODO(jsd): 0660 permissions on the folder?
+		// TODO(jsd): 0770 permissions on the folder?
 		// TODO(jsd): Hide mkdir error?
-		os.MkdirAll(la.Address, os.FileMode(0660))
+		os.MkdirAll(filepath.Dir(la.Address), os.FileMode(0770) | os.ModeDir)
 	}
 
 	// Create the socket to listen on:
