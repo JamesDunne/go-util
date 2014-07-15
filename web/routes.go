@@ -14,3 +14,16 @@ func MatchSimpleRoute(path, route string) (remainder string, ok bool) {
 
 	return "", false
 }
+
+// matches path against "/a/b{*}" routes and returns "*" portion (including leading '/') or "".
+func MatchSimpleRouteRaw(path, route string) (remainder string, ok bool) {
+	if path == route {
+		return "", true
+	}
+
+	if strings.HasPrefix(path, route) {
+		return path[len(route):], true
+	}
+
+	return "", false
+}

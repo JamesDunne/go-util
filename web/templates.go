@@ -9,10 +9,14 @@ import (
 import "github.com/JamesDunne/go-util/fs/notify"
 
 // Watches the html/*.html templates for changes:
-func WatchTemplates(name, templatePath, glob string, uiTmpl **template.Template) (watcher *notify.Watcher, deferClean func(), err error) {
+func WatchTemplates(name, templatePath, glob string, preParse func(*template.Template) *template.Template, uiTmpl **template.Template) (watcher *notify.Watcher, deferClean func(), err error) {
+	if preParse == nil {
+		preParse = func(t *template.Template) *template.Template { return t }
+	}
+
 	// Parse template files:
 	tmplGlob := path.Join(templatePath, glob)
-	ui, err := template.New(name).ParseGlob(tmplGlob)
+	ui, err := preParse(template.New(name)).ParseGlob(tmplGlob)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -37,7 +41,7 @@ func WatchTemplates(name, templatePath, glob string, uiTmpl **template.Template)
 
 				// Update templates:
 				var err error
-				ui, err := template.New(name).ParseGlob(tmplGlob)
+				ui, err := preParse(template.New(name)).ParseGlob(tmplGlob)
 				if err != nil {
 					log.Println(err)
 					break

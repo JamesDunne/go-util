@@ -69,6 +69,13 @@ func ParseListenable(s string) (l *Listenable, err error) {
 
 // Main method to start up a server.
 func ServeMain(la *Listenable, server func(net.Listener) error) (sig os.Signal, err error) {
+	// Create the folder for any unix sockets to live in:
+	if la.Network == "unix" {
+		// TODO(jsd): 0660 permissions on the folder?
+		// TODO(jsd): Hide mkdir error?
+		os.MkdirAll(la.Address, os.FileMode(0660))
+	}
+
 	// Create the socket to listen on:
 	var l net.Listener
 	l, err = net.Listen(la.Network, la.Address)
