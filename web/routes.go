@@ -2,6 +2,11 @@ package web
 
 import "strings"
 
+// matches path against "/a/b" exact route.
+func MatchExactRoute(path, route string) (ok bool) {
+	return path == route
+}
+
 // matches path against "/a/b" routes or "/a/b/*" routes and returns "*" portion or "".
 func MatchSimpleRoute(path, route string) (remainder string, ok bool) {
 	if path == route {
