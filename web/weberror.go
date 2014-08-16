@@ -2,12 +2,20 @@ package web
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
 type WebError struct {
 	StatusCode int
 	Error      error
+}
+
+// Override this to provide custom web error logging:
+type WebErrorLogFunc func(req *http.Request, werr *WebError)
+
+func DefaultWebErrorLog(req *http.Request, werr *WebError) {
+	log.Printf("%3d %s %s ERROR %s\n", werr.StatusCode, req.Method, req.URL, werr.Error.Error())
 }
 
 func AsWebError(err error, statusCode int) *WebError {
@@ -57,6 +65,52 @@ func (e *WebError) RespondJSON(rsp http.ResponseWriter) bool {
 	rsp.Write(j)
 	return true
 }
+
+type WebErrorHandler interface {
+	ServeHTTP(http.ResponseWriter, *http.Request) *WebError
+}
+
+type WebErrorHandlerFunc func(http.ResponseWriter, *http.Request) *WebError
+
+// ServeHTTP calls f(w, r).
+func (f WebErrorHandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) *WebError {
+	return f(w, r)
+}
+
+func Log(logfunc WebErrorLogFunc, h WebErrorHandler) WebErrorHandler {
+	if logfunc == nil {
+		logfunc = DefaultWebErrorLog
+	}
+	return WebErrorHandlerFunc(func(w http.ResponseWriter, r *http.Request) (werr *WebError) {
+		werr = h.ServeHTTP(w, r)
+		if werr != nil {
+			logfunc(r, werr)
+		}
+		return werr
+	})
+}
+
+func JSON(h WebErrorHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		werr := h.ServeHTTP(w, r)
+		if werr != nil {
+			werr.RespondJSON(w)
+		}
+		return
+	})
+}
+
+func HTML(h WebErrorHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		werr := h.ServeHTTP(w, r)
+		if werr != nil {
+			werr.RespondHTML(w)
+		}
+		return
+	})
+}
+
+///////////////////////////////////////////////////////////
 
 func JsonSuccess(rsp http.ResponseWriter, result interface{}) {
 	rsp.Header().Set("Content-Type", "application/json; charset=utf-8")
