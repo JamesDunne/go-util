@@ -20,6 +20,13 @@ func AsWebError(err error, statusCode int) *WebError {
 	}
 }
 
+func (e *WebError) Do(action func(e *WebError)) *WebError {
+	if e != nil {
+		action(e)
+	}
+	return e
+}
+
 func (e *WebError) RespondHTML(rsp http.ResponseWriter) bool {
 	if e == nil {
 		return false
