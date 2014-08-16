@@ -14,7 +14,9 @@ type WebError struct {
 // Override this to provide custom web error logging:
 type WebErrorLogFunc func(req *http.Request, werr *WebError)
 
-func DefaultWebErrorLog(req *http.Request, werr *WebError) {
+var DefaultWebErrorLog WebErrorLogFunc = WebErrorLogFunc(defaultWebErrorLog)
+
+func defaultWebErrorLog(req *http.Request, werr *WebError) {
 	log.Printf("%3d %s %s ERROR %s\n", werr.StatusCode, req.Method, req.URL, werr.Error.Error())
 }
 
