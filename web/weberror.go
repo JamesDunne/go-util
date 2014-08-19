@@ -6,84 +6,157 @@ import (
 	"net/http"
 )
 
-type WebError struct {
-	StatusCode int
-	Error      error
+type ResponseKind int
+
+const (
+	Undetermined ResponseKind = iota
+	HTML
+	JSON
+	Empty
+)
+
+type Error struct {
+	ResponseKind ResponseKind
+	StatusCode   int
+	Error        error
 }
 
 // Override this to provide custom web error logging:
-type WebErrorLogFunc func(req *http.Request, werr *WebError)
+type ErrorLogFunc func(req *http.Request, werr *Error)
 
-var DefaultWebErrorLog WebErrorLogFunc = WebErrorLogFunc(defaultWebErrorLog)
+func defaultErrorLog(req *http.Request, werr *Error) {
+	if werr == nil {
+		return
+	}
+	// Don't log non-error HTTP statuses:
+	if werr.StatusCode < 400 {
+		return
+	}
 
-func defaultWebErrorLog(req *http.Request, werr *WebError) {
-	log.Printf("%3d %s %s ERROR %s\n", werr.StatusCode, req.Method, req.URL, werr.Error.Error())
+	err := ""
+	if werr.Error != nil {
+		err = werr.Error.Error()
+	}
+
+	log.Printf("%3d %s %s ERROR %s\n", werr.StatusCode, req.Method, req.URL, err)
 }
 
-func AsWebError(err error, statusCode int) *WebError {
+var DefaultErrorLog ErrorLogFunc = ErrorLogFunc(defaultErrorLog)
+
+func NewError(err error, statusCode int, kind ResponseKind) *Error {
+	return &Error{
+		ResponseKind: kind,
+		StatusCode:   statusCode,
+		Error:        err,
+	}
+}
+
+func AsError(err error, statusCode int) *Error {
 	if err == nil {
 		return nil
 	}
-	return &WebError{
-		StatusCode: statusCode,
-		Error:      err,
+	return &Error{
+		ResponseKind: Undetermined,
+		StatusCode:   statusCode,
+		Error:        err,
 	}
 }
 
-func (e *WebError) Do(action func(e *WebError)) *WebError {
-	if e != nil {
-		action(e)
+func AsErrorHTML(err error, statusCode int) *Error {
+	if err == nil {
+		return nil
 	}
+	return &Error{
+		ResponseKind: HTML,
+		StatusCode:   statusCode,
+		Error:        err,
+	}
+}
+
+func AsErrorJSON(err error, statusCode int) *Error {
+	if err == nil {
+		return nil
+	}
+	return &Error{
+		ResponseKind: JSON,
+		StatusCode:   statusCode,
+		Error:        err,
+	}
+}
+
+func (e *Error) Respond(rsp http.ResponseWriter) bool {
+	if e == nil {
+		return false
+	}
+
+	if e.ResponseKind == HTML {
+		rsp.Header().Set("Content-Type", "text/html; charset=utf-8")
+		rsp.WriteHeader(e.StatusCode)
+		rsp.Write([]byte(e.Error.Error()))
+		return true
+	} else if e.ResponseKind == JSON {
+		rsp.Header().Set("Content-Type", "application/json; charset=utf-8")
+		rsp.WriteHeader(e.StatusCode)
+		j, jerr := json.Marshal(&struct {
+			StatusCode int    `json:"statusCode"`
+			Error      string `json:"error"`
+		}{
+			StatusCode: e.StatusCode,
+			Error:      e.Error.Error(),
+		})
+		if jerr != nil {
+			panic(jerr)
+		}
+		rsp.Write(j)
+		return true
+	} else if e.ResponseKind == Empty {
+		rsp.WriteHeader(e.StatusCode)
+		return true
+	}
+
+	return false
+}
+
+func (e *Error) AsJSON() *Error {
+	if e == nil {
+		return nil
+	}
+	e.ResponseKind = JSON
 	return e
 }
 
-func (e *WebError) RespondHTML(rsp http.ResponseWriter) bool {
+func (e *Error) AsHTML() *Error {
 	if e == nil {
-		return false
+		return nil
 	}
-
-	rsp.WriteHeader(e.StatusCode)
-	rsp.Write([]byte(e.Error.Error()))
-	return true
+	e.ResponseKind = HTML
+	return e
 }
 
-func (e *WebError) RespondJSON(rsp http.ResponseWriter) bool {
+func (e *Error) As(kind ResponseKind) *Error {
 	if e == nil {
-		return false
+		return nil
 	}
-
-	rsp.Header().Set("Content-Type", "application/json; charset=utf-8")
-	rsp.WriteHeader(e.StatusCode)
-	j, jerr := json.Marshal(&struct {
-		StatusCode int    `json:"statusCode"`
-		Error      string `json:"error"`
-	}{
-		StatusCode: e.StatusCode,
-		Error:      e.Error.Error(),
-	})
-	if jerr != nil {
-		panic(jerr)
-	}
-	rsp.Write(j)
-	return true
+	e.ResponseKind = kind
+	return e
 }
 
-type WebErrorHandler interface {
-	ServeHTTP(http.ResponseWriter, *http.Request) *WebError
+type ErrorHandler interface {
+	ServeHTTP(http.ResponseWriter, *http.Request) *Error
 }
 
-type WebErrorHandlerFunc func(http.ResponseWriter, *http.Request) *WebError
+type ErrorHandlerFunc func(http.ResponseWriter, *http.Request) *Error
 
 // ServeHTTP calls f(w, r).
-func (f WebErrorHandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) *WebError {
+func (f ErrorHandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) *Error {
 	return f(w, r)
 }
 
-func Log(logfunc WebErrorLogFunc, h WebErrorHandler) WebErrorHandler {
+func Log(logfunc ErrorLogFunc, h ErrorHandler) ErrorHandler {
 	if logfunc == nil {
-		logfunc = DefaultWebErrorLog
+		logfunc = DefaultErrorLog
 	}
-	return WebErrorHandlerFunc(func(w http.ResponseWriter, r *http.Request) (werr *WebError) {
+	return ErrorHandlerFunc(func(w http.ResponseWriter, r *http.Request) (werr *Error) {
 		werr = h.ServeHTTP(w, r)
 		if werr != nil {
 			logfunc(r, werr)
@@ -92,22 +165,10 @@ func Log(logfunc WebErrorLogFunc, h WebErrorHandler) WebErrorHandler {
 	})
 }
 
-func JSON(h WebErrorHandler) http.Handler {
+func ReportErrors(h ErrorHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		werr := h.ServeHTTP(w, r)
-		if werr != nil {
-			werr.RespondJSON(w)
-		}
-		return
-	})
-}
-
-func HTML(h WebErrorHandler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		werr := h.ServeHTTP(w, r)
-		if werr != nil {
-			werr.RespondHTML(w)
-		}
+		werr.Respond(w)
 		return
 	})
 }
@@ -135,5 +196,5 @@ func JsonErrorIf(rsp http.ResponseWriter, err error, statusCode int) bool {
 		return false
 	}
 
-	return AsWebError(err, statusCode).RespondJSON(rsp)
+	return AsErrorJSON(err, statusCode).Respond(rsp)
 }

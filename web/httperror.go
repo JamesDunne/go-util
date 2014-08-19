@@ -42,15 +42,15 @@ func getErrorDetails(panicked interface{}, stackTrace string) (statusCode int, u
 	return
 }
 
-type ErrorHandler struct {
+type HttpErrorHandler struct {
 	handler http.HandlerFunc
 }
 
-func NewErrorHandler(handler http.HandlerFunc) ErrorHandler {
-	return ErrorHandler{handler: handler}
+func NewHttpErrorHandler(handler http.HandlerFunc) HttpErrorHandler {
+	return HttpErrorHandler{handler: handler}
 }
 
-func (h ErrorHandler) ServeHTTP(rsp http.ResponseWriter, req *http.Request) {
+func (h HttpErrorHandler) ServeHTTP(rsp http.ResponseWriter, req *http.Request) {
 	// Catch any panics from the handler:
 	pnk, stackTrace := base.Try(func() {
 		h.handler(rsp, req)
