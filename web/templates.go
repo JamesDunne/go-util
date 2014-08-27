@@ -7,6 +7,7 @@ import (
 )
 
 import "github.com/JamesDunne/go-util/fs/notify"
+import "github.com/JamesDunne/go-util/base"
 
 // Watches the html/*.html templates for changes:
 func WatchTemplates(name, templatePath, glob string, preParse func(*template.Template) *template.Template, uiTmpl **template.Template) (watcher *notify.Watcher, deferClean func(), err error) {
@@ -15,8 +16,7 @@ func WatchTemplates(name, templatePath, glob string, preParse func(*template.Tem
 	}
 
 	// Parse template files:
-	tmplGlob := path.Join(templatePath, glob)
-	ui, err := preParse(template.New(name)).ParseGlob(tmplGlob)
+	ui, err := preParse(template.New(name)).ParseGlob(path.Join(base.CanonicalPath(templatePath), glob))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -41,7 +41,7 @@ func WatchTemplates(name, templatePath, glob string, preParse func(*template.Tem
 
 				// Update templates:
 				var err error
-				ui, err := preParse(template.New(name)).ParseGlob(tmplGlob)
+				ui, err := preParse(template.New(name)).ParseGlob(path.Join(base.CanonicalPath(templatePath), glob))
 				if err != nil {
 					log.Println(err)
 					break

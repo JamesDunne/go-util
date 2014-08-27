@@ -13,3 +13,11 @@ func CanonicalPath(path string) string {
 	}
 	return abs
 }
+
+func CanonicalSymlinkPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		panic(err)
+	}
+	return abs
+}
