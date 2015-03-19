@@ -7,6 +7,17 @@ func MatchExactRoute(path, route string) (ok bool) {
 	return path == route
 }
 
+// matches path against "/a/b/" exact route.
+func MatchExactRouteIgnoreSlash(path, route string) (ok bool) {
+	if strings.HasSuffix(path, "/") {
+		path = path[:len(path)-1]
+	}
+	if strings.HasSuffix(route, "/") {
+		route = route[:len(route)-1]
+	}
+	return path == route
+}
+
 // matches path against "/a/b" routes or "/a/b/*" routes and returns "*" portion or "".
 func MatchSimpleRoute(path, route string) (remainder string, ok bool) {
 	if path == route {
