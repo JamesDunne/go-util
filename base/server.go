@@ -74,7 +74,7 @@ func ServeMain(la *Listenable, server func(net.Listener) error) (sig os.Signal, 
 	if la.Network == "unix" {
 		// TODO(jsd): 0770 permissions on the folder?
 		// TODO(jsd): Hide mkdir error?
-		os.MkdirAll(filepath.Dir(la.Address), os.FileMode(0770) | os.ModeDir)
+		os.MkdirAll(filepath.Dir(la.Address), os.FileMode(0770)|os.ModeDir)
 	}
 
 	// Create the socket to listen on:
@@ -84,24 +84,7 @@ func ServeMain(la *Listenable, server func(net.Listener) error) (sig os.Signal, 
 		return
 	}
 
-	// NOTE(jsd): Unix sockets must be removed before being reused.
-
-	// Handle common process-killing signals so we can gracefully shut down:
-	// TODO(jsd): Go does not catch Windows' process kill signals (yet?)
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGQUIT)
-
-	go func() {
-		// Start a server; `err` will be returned to the caller:
-		err = server(l)
-
-		// Signal completion:
-		sigc <- terminateSignal{}
-		signal.Stop(sigc)
-	}()
-
-	// Wait for a termination signal (normal or otherwise):
-	sig = <-sigc
+	sig, err = Daemonize(func() error { return server(l) })
 
 	// Stop listening:
 	l.Close()
@@ -110,6 +93,29 @@ func ServeMain(la *Listenable, server func(net.Listener) error) (sig os.Signal, 
 	if la.Network == "unix" {
 		os.Remove(la.Address)
 	}
+
+	return
+}
+
+type Daemon func() error
+
+func Daemonize(start Daemon) (sig os.Signal, err error) {
+	// Handle common process-killing signals so we can gracefully shut down:
+	// TODO(jsd): Go does not catch Windows' process kill signals (yet?)
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, os.Interrupt, os.Kill, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+
+	go func() {
+		// Start a server; `err` will be returned to the caller:
+		err = start()
+
+		// Signal completion:
+		sigc <- terminateSignal{}
+		signal.Stop(sigc)
+	}()
+
+	// Wait for a termination signal (normal or otherwise):
+	sig = <-sigc
 
 	return
 }
